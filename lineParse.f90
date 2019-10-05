@@ -442,7 +442,7 @@ character(80) :: getLine, line
    ln = ln + 1
    if (err.gt.0) then
       write(6,'(A)') line !show what they wrote
-      write(0,'(A,i4,A,i4)') "read ERROR",err," on input line: ",ln
+      write(0,'(A,i4,A,i4)') "getLine: read ERROR: iostat=",err," on input line: ",ln
       eo = 1 !error
    elseif (err.lt.0) then
       eo = -1 !End of script
