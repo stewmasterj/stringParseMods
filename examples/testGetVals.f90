@@ -1,4 +1,4 @@
-!compile: gfortran lineParse.f90  testGetVals.f90 -o testGetVals
+!compile: gfortran ../lineParse.f90  testGetVals.f90 -o testGetVals
 program test
 use lineParse
 implicit none

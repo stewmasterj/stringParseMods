@@ -1,4 +1,4 @@
-! compile: gfortran -fbounds-check lineParse.f90 f90eval.f90 -o f90eval
+! compile: gfortran -fbounds-check ../lineParse.f90 f90eval.f90 -o f90eval
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1!!!!!80
 ! Ross J. Stewart 02 June 2012
 module structDef

@@ -12,6 +12,7 @@ module lineParse
 ! integer function s_num_count( s )
 ! character(80) function s_get_num( n, s, attr )
 ! character(80) function s_get_line( fid, ln, eo )
+! character(80) function s_sub( w, s, r )
 ! real(4) function evaluate( s )
 
 ! overload the s_get_val functions for various value types
@@ -156,7 +157,7 @@ integer ( kind = 4 ) s_word_count
 character ( len = * ) s
 character ( len = 19 ) :: delimiters
 
-delimiters=" ,;:()[]{}'=*%"//char(09)//char(34)
+delimiters=" ,;:()[]{}'=%"//char(09)//char(34)
 s_word_count = 0
 lens = len ( s )
 
@@ -453,28 +454,82 @@ character(80) :: getLine, line
 
 end function !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+function s_sub( w, s, r ) !{{{
+! substitute occurences of w in s with r
+implicit none
+character ( len = * ), intent(in) :: w, s, r
+character(80) :: s_sub
+integer :: lw, ls, wp, we
+
+lw = len(trim(adjustl(w)))
+ls = len(trim(s))
+if (lw.eq.0) then
+ write(0,*) "ERROR: lineParse.f90:s_sub: word lenth is zero: "//trim(adjustl(w))
+ call flush(0)
+endif
+
+! where is the word w in s?
+wp = index( trim(s), trim(adjustl(w)) )
+if (wp.eq.0) then
+ write(0,*) "ERROR: lineParse.f90:s_sub: word: "//trim(adjustl(w))//" not found in string: "//trim(s)
+ call flush(0)
+endif
+we = wp +lw 
+
+if (wp.eq.1.and.lw.ge.ls) then
+   s_sub = trim(adjustl(r))
+elseif (wp.eq.1) then
+   s_sub = trim(adjustl(r))//s(we:ls)
+elseif (we.ge.ls) then
+   s_sub = s(1:wp-1)//trim(adjustl(r))
+else
+   s_sub = s(1:wp-1)//trim(adjustl(r))//s(we:ls)
+endif
+
+end function s_sub !}}}
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 function evaluate( s ) !{{{
 implicit none
-real(4) :: evaluate, x, y
+!real(4) :: evaluate
+character(80) :: evaluate
 character ( len = * ), intent(in) :: s
+integer :: wc, i
+character ( len = 80 ) :: s1, s2
+
+wc = s_num_count( s )
+
+s1 = trim(s)
+do i = 1, wc-1
+ s2 = eval1( s1 )
+ s1 = trim(s2)
+enddo
+
+!read(s1,*) evaluate
+evaluate = trim(s1)
+
+end function evaluate !}}}
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+function eval1( s ) !{{{
+implicit none
+real(4) :: x, y
 integer :: wc, dc, i, lens
-character :: attr
-character ( len = 19 ) :: delimiters
-character ( len = 80 ) :: delims, cx, cy, tmp1, tmp2, tmp3
+character ( len = * ), intent(in) :: s
 integer, dimension(30) :: deliml
+character ( len = 19 ) :: delimiters
+character ( len = 80 ) :: delims, cx, cy, tmp2, tmp3, eval1
+character :: attr
 logical :: first
 
+wc = s_num_count( s )
 first = .false.
 delimiters="+-*^/"
-wc = s_num_count( s )
 dc = 0 
-lens = len ( trim(s) )
-tmp1 = trim(s)
 delims = ""
+lens = len ( trim(s) )
 
 ! order and collect the delimeters
 delims = ""
-do i = 1, len(trim(tmp1))
+do i = 1, lens
    if ( index(delimiters,s(i:i)).ne.0 ) then
       dc = dc + 1
       delims = trim(delims)//s(i:i)
@@ -487,144 +542,127 @@ if (dc.ge.wc) first=.true.
 do i = 1, dc
    if (delims(i:i).eq."^") then 
       if (first) then
-         cx = s_get_num( i+1, tmp1, attr )
-         cy = s_get_num( i+2, tmp1, attr )
+         cx = s_get_num( i+1, s, attr )
+         cy = s_get_num( i+2, s, attr )
       else
-         cx = s_get_num( i,   tmp1, attr )
-         cy = s_get_num( i+1, tmp1, attr )
+         cx = s_get_num( i,   s, attr )
+         cy = s_get_num( i+1, s, attr )
       endif
       read(cx,*) x
       read(cy,*) y
       !must substitute the result into the main string
-      write(6,*) "initial ",tmp1
       if (i.eq.1.and.i.eq.dc) then
-         evaluate = x**y
-         Return
+         write(tmp3,*) x**y
       elseif (i.eq.1) then
          write(tmp2,*) x**y
-         tmp3=trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       elseif (i.eq.dc) then
          write(tmp2,*) x**y
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))
       else
          write(tmp2,*) x**y
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       endif
-      tmp1 = trim(tmp3)
-      write(6,*) "exponents ",tmp1
+!      write(6,*) "exponents ",trim(tmp3)
+      eval1 = trim(tmp3)
+      return
    endif
 enddo
-delims = ""; dc = 0
-do i = 1, len(trim(tmp1))
-   if ( index(delimiters,tmp1(i:i)).ne.0 ) then
-      dc = dc + 1
-      delims = trim(delims)//tmp1(i:i)
-      deliml(dc) = i !location of delimiter
-   end if
-enddo
-!deal with Multiplication and division
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 do i = 1, dc
    if (delims(i:i).eq."*".or.delims(i:i).eq."/") then 
       if (first) then
-         cx = s_get_num( i+1, tmp1, attr )
-         cy = s_get_num( i+2, tmp1, attr )
+         cx = s_get_num( i+1, s, attr )
+         cy = s_get_num( i+2, s, attr )
       else
-         cx = s_get_num( i,   tmp1, attr )
-         cy = s_get_num( i+1, tmp1, attr )
+         cx = s_get_num( i,   s, attr )
+         cy = s_get_num( i+1, s, attr )
       endif
       read(cx,*) x
       read(cy,*) y
       !must substitute the result into the main string
       if (i.eq.1.and.i.eq.dc) then
          if (delims(i:i).eq."*") then
-            evaluate = x*y
+            write(tmp3,*) x*y
          elseif (delims(i:i).eq."/") then
-            evaluate = x/y
+            write(tmp3,*) x/y
          endif
-         Return
       elseif (i.eq.1) then
          if (delims(i:i).eq."*") then
             write(tmp2,*) x*y
          elseif (delims(i:i).eq."/") then
             write(tmp2,*) x/y
          endif
-         tmp3=trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       elseif (i.eq.dc) then
          if (delims(i:i).eq."*") then
             write(tmp2,*) x*y
          elseif (delims(i:i).eq."/") then
             write(tmp2,*) x/y
          endif
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))
       else
          if (delims(i:i).eq."*") then
             write(tmp2,*) x*y
          elseif (delims(i:i).eq."/") then
             write(tmp2,*) x/y
          endif
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       endif
-      tmp1 = trim(tmp3)
-      write(6,*) "multdiv ", tmp1
+!      write(6,*) "multdiv ", trim(tmp3)
+      eval1 = trim(tmp3)
+      return
    endif
 enddo
-delims = ""; dc = 0
-do i = 1, len(trim(tmp1))
-   if ( index(delimiters,tmp1(i:i)).ne.0 ) then
-      dc = dc + 1
-      delims = trim(delims)//tmp1(i:i)
-      deliml(dc) = i !location of delimiter
-   end if
-enddo
-!deal with Addition and Subtraction
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 do i = 1, dc
    if (delims(i:i).eq."+".or.delims(i:i).eq."-") then 
       if (first) then
-         cx = s_get_num( i+1, tmp1, attr )
-         cy = s_get_num( i+2, tmp1, attr )
+         cx = s_get_num( i+1, s, attr )
+         cy = s_get_num( i+2, s, attr )
       else
-         cx = s_get_num( i,   tmp1, attr )
-         cy = s_get_num( i+1, tmp1, attr )
+         cx = s_get_num( i,   s, attr )
+         cy = s_get_num( i+1, s, attr )
       endif
       read(cx,*) x
       read(cy,*) y
       !must substitute the result into the main string
       if (i.eq.1.and.i.eq.dc) then
          if (delims(i:i).eq."+") then
-            evaluate = x+y
+            write(tmp3,*) x+y
          elseif (delims(i:i).eq."-") then
-            evaluate = x-y
+            write(tmp3,*) x-y
          endif
-         Return
       elseif (i.eq.1) then
          if (delims(i:i).eq."+") then
             write(tmp2,*) x+y
          elseif (delims(i:i).eq."-") then
             write(tmp2,*) x-y
          endif
-         tmp3=trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       elseif (i.eq.dc) then
          if (delims(i:i).eq."+") then
             write(tmp2,*) x+y
          elseif (delims(i:i).eq."-") then
             write(tmp2,*) x-y
          endif
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))
       else
          if (delims(i:i).eq."+") then
             write(tmp2,*) x+y
          elseif (delims(i:i).eq."-") then
             write(tmp2,*) x-y
          endif
-         tmp3=tmp1(1:deliml(i-1))//trim(adjustl(tmp2))//tmp1(deliml(i+1):len(tmp1))
+         tmp3=s(1:deliml(i-1))//trim(adjustl(tmp2))//s(deliml(i+1):len(s))
       endif
-      tmp1 = trim(tmp3)
-      write(6,*) "addsub ",tmp1
+!      write(6,*) "addsub ",trim(tmp3)
+      eval1 = trim(tmp3)
+      return
    endif
 enddo
 
-read(tmp1,*) evaluate
 
-end function evaluate !}}}
+
+end function eval1 !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 end module lineParse 

@@ -1,4 +1,4 @@
-! compile: gfortran lineParse.f90 testLineParse.f90 -o testLineParse
+! compile: gfortran ../lineParse.f90 testLineParse.f90 -o testLineParse
 ! Ross J. Stewart 02 June 2012
 program testLineParse
 use lineParse
