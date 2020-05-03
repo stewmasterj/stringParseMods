@@ -9,6 +9,7 @@ module lineParse
 ! character(80) function s_get_word_range( n1, n2, s )
 ! subroutine s_get_val( n, s, val, attr )
 ! subroutine left_of( w , s )		returns part of s left of w
+! integer function s_pat_count ( w, s ) 
 ! integer function s_num_count( s )
 ! character(80) function s_get_num( n, s, attr )
 ! character(80) function s_get_line( fid, ln, eo )
@@ -157,7 +158,7 @@ integer ( kind = 4 ) s_word_count
 character ( len = * ) s
 character ( len = 19 ) :: delimiters
 
-delimiters=" ,;:()[]{}'=%"//char(09)//char(34)
+delimiters=" ,;:[]{}'=%"//char(09)//char(34)
 s_word_count = 0
 lens = len ( s )
 
@@ -189,8 +190,8 @@ character ( len = 80 )  s_get_word
 character ( len = 18 ) :: delimiters
 character ( len = 5 ) :: obrk, cbrk
 
-obrk="([{'"//char(34)
-cbrk=")]}'"//char(34)
+obrk="[{'"//char(34)
+cbrk="]}'"//char(34)
 delimiters=" ,:;=%"//char(09)//obrk//cbrk
 s_word_count = 0
 lens = len ( trim(s) )
@@ -358,6 +359,25 @@ enddo
         
 end subroutine left_of !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+function s_pat_count ( w, s ) !{{{
+! returns the number of occurences of w in s
+implicit none
+integer ( kind = 4 ) s_pat_count
+character ( len = *) :: s, w
+integer :: ls, i, lw
+
+ls = len(trim(s))
+lw = len(trim(w))
+s_pat_count = 0
+
+do i = 1, ls-lw
+  if (trim(w).eq.s(i:i+lw)) then
+    s_pat_count = s_pat_count + 1
+  endif
+enddo
+
+end function s_pat_count !}}}
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 function s_num_count ( s ) !{{{
 ! Ross J. Stewart, 13 March 2016
 !count numbers
@@ -380,7 +400,7 @@ blank = .true.
 
 do i = 1, lens
     if ( index(delimiters,s(i:i)).ne.0 ) then
-      blank = .true.
+      if (i.gt.1.and.s(i-1:i-1).ne."E".and.s(i-1:i-1).ne."e")  blank = .true.
     else if ( blank ) then
       s_num_count = s_num_count + 1
       blank = .false.
@@ -415,9 +435,11 @@ blank = .true.
 
 do i = 1, lens
    if ( index(delimiters,s(i:i)).ne.0 ) then
-      blank = .true.
-      attr = s(i:i) ! save the delimeter caught
-      if (n.eq.s_word_count) Return
+      if (i.gt.1.and.s(i-1:i-1).ne."E".and.s(i-1:i-1).ne."e")  then
+        blank = .true.
+        attr = s(i:i) ! save the delimeter caught
+        if (n.eq.s_word_count) Return
+      endif
    elseif ( blank ) then
       s_word_count = s_word_count + 1
       blank = .false.
@@ -454,12 +476,13 @@ character(80) :: getLine, line
 
 end function !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-function s_sub( w, s, r ) !{{{
+function s_sub( w, s, r, err ) !{{{
 ! substitute occurences of w in s with r
 implicit none
 character ( len = * ), intent(in) :: w, s, r
 character(80) :: s_sub
 integer :: lw, ls, wp, we
+integer, optional :: err
 
 lw = len(trim(adjustl(w)))
 ls = len(trim(s))
@@ -471,8 +494,16 @@ endif
 ! where is the word w in s?
 wp = index( trim(s), trim(adjustl(w)) )
 if (wp.eq.0) then
- write(0,*) "ERROR: lineParse.f90:s_sub: word: "//trim(adjustl(w))//" not found in string: "//trim(s)
- call flush(0)
+ if (present(err)) then
+   err = 1
+   s_sub = trim(s)
+   return
+ else
+   write(0,*) "ERROR: lineParse.f90:s_sub: word: "//trim(adjustl(w))//" not found in string: "//trim(s)
+   call flush(0)
+   s_sub = trim(s)
+   return
+ endif
 endif
 we = wp +lw 
 
@@ -493,17 +524,94 @@ implicit none
 !real(4) :: evaluate
 character(80) :: evaluate
 character ( len = * ), intent(in) :: s
-integer :: wc, i
-character ( len = 80 ) :: s1, s2
+integer :: wc, i, j, ls, bp, ep, np, bf
+character ( len = 80 ) :: s1, s2, s3
+character ( len = 19 ) :: delimiters
+real(8) :: val
 
-wc = s_num_count( s )
+delimiters="+-*^/"
+ls = len(trim(s))
+
+np = 0
+! outer loop for parensthenes
+do i = 1, ls
+ if (s(i:i).eq."(") np = np + 1   ! number of total parensthenes expected
+enddo
 
 s1 = trim(s)
-do i = 1, wc-1
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+do i = 1, np ! loop over parensthenes sets
+  ! find the innermost expression within ()
+  ls = len(s1)
+  bp = 0; ep = ls
+  do j = 1, ls
+   if (s1(j:j).eq."(") bp = j
+   if (s1(j:j).eq.")") then
+     ep = j
+     exit
+   endif
+  enddo
+  !if (bp.gt.0.and.ep.gt.bp+1) then ! there exists a parensthenes set
+  !  s2 = s1(bp+1:ep-1)  !innermost expression
+  !else
+  !  s2 = trim(s1)
+  !endif
+  s2 = s1(bp+1:ep-1)  !innermost expression
+  
+  ! loop this for a given expression sans parensthenes
+  wc = s_num_count( s2 )
+  do j = 1, wc-1
+   s3 = eval1( s2 )
+   s2 = trim(s3)
+  enddo
+
+  ! check if parensthenes are a function
+  if (bp.gt.1) then
+    bf = 0
+    do j = 1, 6
+       if (bp-j.le.1) then 
+         bf = 1; exit
+       endif
+       if (j.eq.1.and.index(delimiters,s1(bp-j:bp-j)).ne.0) exit ! no function
+       if (index(delimiters,s1(bp-j:bp-j)).ne.0) then
+         bf = bp-j+1; exit
+       endif
+    enddo
+    if (bf.gt.0) then ! it's a function
+      select case (s1(bf:bp-1)) ! what's the function name?
+        case("sin"); read(s2,*) val
+          write(s2,*) real(dsin(val))
+        case("cos"); read(s2,*) val; write(s2,*) real(dcos(val))
+        case("tan"); read(s2,*) val; write(s2,*) real(dtan(val))
+        case("asin"); read(s2,*) val; write(s2,*) real(dasin(val))
+        case("acos"); read(s2,*) val; write(s2,*) real(dacos(val))
+        case("atan"); read(s2,*) val; write(s2,*) real(datan(val))
+        case("log"); read(s2,*) val; write(s2,*) real(dlog(val))
+        case("exp"); read(s2,*) val; write(s2,*) real(dexp(val))
+        case default; write(0,*) "unrecognized math function: "//s1(bf:bp-1)
+      end select
+      bp = bf ! for substitution reasons below
+    endif
+  endif
+  ! substitute result back into s1
+  if (bp.eq.1.and.ep.eq.ls) then
+     s1 = s2
+  elseif (bp.eq.1) then
+     s1=trim(adjustl(s2))//s1(ep+1:ls)
+  elseif (ep.eq.ls) then
+     s1=s1(1:bp-1)//trim(adjustl(s2))
+  else
+     s1=s1(1:bp-1)//trim(adjustl(s2))//s1(ep+1:ls)
+  endif
+  
+enddo
+
+! loop this for a given expression sans parensthenes
+wc = s_num_count( s1 )
+do j = 1, wc-1
  s2 = eval1( s1 )
  s1 = trim(s2)
 enddo
-
 !read(s1,*) evaluate
 evaluate = trim(s1)
 
@@ -512,7 +620,7 @@ end function evaluate !}}}
 function eval1( s ) !{{{
 implicit none
 real(4) :: x, y
-integer :: wc, dc, i, lens
+integer :: wc, dc, i, lens, ival
 character ( len = * ), intent(in) :: s
 integer, dimension(30) :: deliml
 character ( len = 19 ) :: delimiters
@@ -531,9 +639,11 @@ lens = len ( trim(s) )
 delims = ""
 do i = 1, lens
    if ( index(delimiters,s(i:i)).ne.0 ) then
-      dc = dc + 1
-      delims = trim(delims)//s(i:i)
-      deliml(dc) = i !location of delimiter
+      if (i.gt.1.and.s(i-1:i-1).ne."E".and.s(i-1:i-1).ne."e") then
+       dc = dc + 1
+       delims = trim(delims)//s(i:i)
+       deliml(dc) = i !location of delimiter
+      endif
    end if
 enddo
 
@@ -548,8 +658,12 @@ do i = 1, dc
          cx = s_get_num( i,   s, attr )
          cy = s_get_num( i+1, s, attr )
       endif
-      read(cx,*) x
-      read(cy,*) y
+      if (index(cx,".").ne.0) then; read(cx,*) x
+      else;  read(cx,*) ival; x=real(ival); endif
+      if (index(cy,".").ne.0) then; read(cy,*) y
+      else;  read(cy,*) ival; y=real(ival); endif
+      !read(cx,*) x
+      !read(cy,*) y
       !must substitute the result into the main string
       if (i.eq.1.and.i.eq.dc) then
          write(tmp3,*) x**y
@@ -578,8 +692,11 @@ do i = 1, dc
          cx = s_get_num( i,   s, attr )
          cy = s_get_num( i+1, s, attr )
       endif
-      read(cx,*) x
-      read(cy,*) y
+!write(0,*) trim(cx)//" "//trim(cy)//" s:"//trim(s)
+      if (index(cx,".").ne.0) then; read(cx,*) x
+      else;  read(cx,*) ival; x=real(ival); endif
+      if (index(cy,".").ne.0) then; read(cy,*) y
+      else;  read(cy,*) ival; y=real(ival); endif
       !must substitute the result into the main string
       if (i.eq.1.and.i.eq.dc) then
          if (delims(i:i).eq."*") then
@@ -624,8 +741,12 @@ do i = 1, dc
          cx = s_get_num( i,   s, attr )
          cy = s_get_num( i+1, s, attr )
       endif
-      read(cx,*) x
-      read(cy,*) y
+      if (index(cx,".").ne.0) then; read(cx,*) x
+      else;  read(cx,*) ival; x=real(ival); endif
+      if (index(cy,".").ne.0) then; read(cy,*) y
+      else;  read(cy,*) ival; y=real(ival); endif
+      !read(cx,*) x
+      !read(cy,*) y
       !must substitute the result into the main string
       if (i.eq.1.and.i.eq.dc) then
          if (delims(i:i).eq."+") then

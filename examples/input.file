@@ -1,19 +1,25 @@
-# vim: syntax=sh fdm=marker
+# vim: syntax=text
 
 # only internal script commands
-# PRINT, LBL, GOTO, IFGO
+# PRINT, LBL, GOTO, IFGO, RETURN
 
 # PRINT STRING   # prints STRING to screen (subject to variable and expression expansion)
 # LBL  STRING    # sets STRING to be a label accepting GOTO jumps
-# GOTO LBL       # jump script to lable LBL.
-# IFGO EXPR LBL  # this will GOTO LBL if EXPR >= 1.0
+# GOTO LBL [RETURN]      # jump script to label LBL. return if RETURN
+# IFGO EXPR LBL [RETURN] # this will GOTO LBL if EXPR >= 1.0
+# RETURN         # jumps back to the last line that had RETURN keyword in GOTO or IFGO.
 # if not a command, then checks for an equation for variable declaration.
+# a semicolon ';' starts new command on same line, except for LBL.
 
 #DEBUG # returns each line final evaluated
 
 x=2.0*5 # set variable x
 y=250.0
 PRINT x=$x y=$y 
+
+# call my do loop here instead of later and come back here afterward
+GOTO mydoloop RETURN
+PRINT returned from mydoloop subroutine
 
 # example of some user definied commands for whatever, these will cause warnings
 boundary	$x-10 $x+10
@@ -26,21 +32,35 @@ param		$x*2.0 $x/3.0
 #  PRINT x<250.0
 # ENDIF
 IFGO $x/250.0 else # else block comes first
-  PRINT condition is false: x<250.0
-  GOTO endif     # must have this goto otherwise will execute the next lines
+  PRINT condition is false: x<250.0;   GOTO endif     # must have this goto otherwise will execute the next lines
 LBL else
   PRINT condition is true: x>=250.0
 LBL endif  
 
 
-## Typical do loop ##
-# DO i = 1, 10
-#  PRINT i
-# ENDDO
-i = 0  # declare and set variable i
-LBL do
- i = $i+1  
- PRINT $i
- IFGO $i/10.0 stop # when $i>=10.0 exit loop
-GOTO do    
-LBL stop
+GOTO eof # must have this before listing subroutines
+# ============================================================================80
+#CONTAINS these subroutines
+#   Remember that all variables and labels are character strings and are global
+#SUBROUTINE MY_DO_LOOP #====================================================+=80
+  LBL mydoloop  # jumping here ensures i is initialized
+  pi=3.1415926535 # set a constant for trig functions
+  ## Typical do loop ##
+  # DO i = 1, 10
+  #  PRINT i
+  # ENDDO
+  ## My do loop ##
+  i = 0  # declare and set variable i
+  LBL do
+   i = $i+1;  PRINT 10.0/$i sin($pi*$i/10.0)
+   IFGO 10.0/($i+1) do # do while 10/i < 1.0
+  # Alternate verbose ending, exit condition rather than while condition.
+  # IFGO $i/10.0 enddo # when $i>=10.0 exit loop
+  #GOTO do    
+  #LBL enddo
+  ## end my do loop
+  RETURN    # this should return execution to where it was called
+#END SUBROUTINE #============================================================80
+
+LBL eof  # jump here to terminate script
+# ============================================================================80

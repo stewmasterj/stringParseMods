@@ -19,7 +19,7 @@ use lineParse
 implicit none
 integer, intent(in) :: FD
 character(*), intent(in) :: FN
-integer :: err, nn, nl, wc
+integer :: err, nn, nl, wc, i, j, ns
 character(80) :: line, word
 
 open(FD,file=trim(FN),iostat=err)
@@ -37,8 +37,9 @@ do
   if (wc.gt.0) then
   ! if not empty line
     nn = nn + 1
+    nn = nn + s_pat_count(";",line) ! semicolon denotes new command line
     word = s_get_word(1,line)
-    if (word.eq."LBL".or.word.eq."lbl") nl = nl + 1
+    if (word.eq."LBL".or.word.eq."lbl") nl = nl + 1 ! must be first word
   endif
 enddo
 200 continue
@@ -57,36 +58,52 @@ do
   wc = s_word_count(line)
   if (wc.gt.0) then
   ! if not empty line
-    nn = nn + 1
-    script(nn) = trim(adjustl(line)) ! save this line of the script
+    ns = s_pat_count(";",line) ! semicolon denotes new command line
+    if (ns.eq.0) then
+     nn = nn + 1
+     script(nn) = trim(adjustl(line)) ! save this line of the script
+    else
+     j = 0
+     do i = 0, ns
+      nn = nn + 1
+      word = line(j+1:80) ! save this line of the script
+      j = index(trim(word(j+1:80)),";") ! when does ; appear in word?
+      call left_of(";",word)
+      script(nn) = trim(word)
+     enddo
+    endif
     word = s_get_word(1,line)
     if (word.eq."LBL".or.word.eq."lbl") then
      nl = nl + 1
-     if (wc.ne.2) then
-      write(0,*) "ERROR: sline:",nn,"bad command: "//trim(line)
+     if (s_word_count(script(nn-ns)).ne.2) then
+      write(0,*) "ERROR: sline:",nn-ns,"bad command: "//trim(script(nn-ns))
       write(0,*) "ERROR: the LBL command requires an argument:"
       write(0,*) " Usage:  LBL LABEL"
       write(0,*) "   LABEL  can be an arithmetic expression or string."
       STOP
      endif 
      labels(nl) = trim(s_get_word(2,line))   ! save label name (counts duplicats so beware)
-     snum(nl)   = nn            ! save script line
+     snum(nl)   = nn-ns          ! save script line
 !     write(0,*) "LBL "//trim(labels(nl)),nn
     endif
   endif
 enddo
-
 300 continue
 
 close(FD)
+
+!do i = 1, nn
+! write(0,'(A)') trim(script(i))
+!enddo
+!call flush(0)
 
 end subroutine loadScript !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!80
 subroutine runScript
 use lineParse
 implicit none
-integer :: i, j, wc, n
-character(80) :: line, w(20)
+integer :: i, j, wc, n, lastcall
+character(80) :: line, w(20), tmp
 real(4) :: rv ! real value from evaluate
 logical :: debug
 
@@ -95,6 +112,7 @@ vnam(:) = ""
 vval(:) = ""
 Nvars = 0
 debug = .false.
+lastcall = 1 ! script line number (snum) of last called GOTO with return feature
 
 i = 0
 do ! infinite loop cuz the script might never end!
@@ -127,44 +145,53 @@ do ! infinite loop cuz the script might never end!
  ! Let's parse the commands !
  select case (trim(w(1)))
   case ("DEBUG","debug"); debug = .true.
-  case ("PRINT","print")
-   write(6,'(A)') trim(line(6:80))
+  case ("PRINT","print"); tmp = adjustl(line)
+   write(6,'(A)') trim(tmp(6:80))
   case ("LBL","lbl"); ! do nothing
   case ("GOTO","goto")
-   if (wc.ne.2) then
+   if (wc.ne.2.and.wc.ne.3) then
     write(0,*) "ERROR: sline:",i,"bad command: "//trim(line)
     write(0,*) "ERROR: the GOTO command requires an argument:"
-    write(0,*) " Usage:  GOTO  LABEL"
+    write(0,*) " Usage:  GOTO  LABEL [RETURN]"
     write(0,*) "   LABEL  can be an arithmetic expression or string that evaluates to an"
     write(0,*) "          existing label."
+    write(0,*) "   [RETURN] optional keyword will return to this line when RETURN is called"
     STOP
    endif 
    do j = 1, Nlabels  ! find the label
     if (trim(w(2)).eq.trim(labels(j))) then
+     if (wc.ge.3) then
+       if (trim(w(3)).eq."RETURN") lastcall = i ! save this line incase of a RETURN
+     endif
      i = snum(j)
 !write(0,*) "jumping to sline:",i,"label:"//trim(labels(j))
      exit  ! found. change script line to line after label
     endif
    enddo
   case ("IFGO","ifgo"); 
-   if (wc.ne.3) then
+   if (wc.ne.3.and.wc.ne.4) then
     write(0,*) "ERROR: sline:",i,"bad command: "//trim(line)
     write(0,*) "ERROR: the IFGO command requires two arguments:"
-    write(0,*) " Usage:  IFGO  EXPR  LABEL"
+    write(0,*) " Usage:  IFGO  EXPR  LABEL [RETURN]"
     write(0,*) "   EXPR   is an arithmetic expression, if (EXPR >= 1.0) is true"
     write(0,*) "   LABEL  a label for a target GOTO"
+    write(0,*) "   [RETURN] optional keyword will return to this line when RETURN is called"
     STOP
    endif 
    read(w(2),*) rv ! read condition
    if (rv.ge.1.0) then ! condition true
    do j = 1, Nlabels  ! find the label
     if (trim(w(3)).eq.trim(labels(j))) then
+     if (wc.ge.4) then
+       if (trim(w(4)).eq."RETURN") lastcall = i ! save this line incase of a RETURN
+     endif
      i = snum(j)  ! found. change script line to line after label
 !write(0,*) "jumping to sline:",i,"label:"//trim(labels(j))
      exit
     endif
    enddo
    endif
+  case ("RETURN"); i = lastcall+1 ! actually start on the line after the call 
 !!!!##########################################################################80
 !!!! Add your user defined commands here !!!!
 !  case ("mycommand")
