@@ -4,10 +4,17 @@ module scriptMod
 implicit none
 integer :: Nscript, Nvars, Nlabels
 character(80), dimension(:), allocatable :: script
-character(40), dimension(:), allocatable :: vnam ! variable name
-character(40), dimension(:), allocatable :: vval ! variable value
+!character(40), dimension(:), allocatable :: vnam ! variable name
+!character(40), dimension(:), allocatable :: vval ! variable value
 character(40), dimension(:), allocatable :: labels  ! goto labels
 integer, dimension(:), allocatable :: snum  ! script lines for labels
+
+type scriptvariable
+ character(40) :: n ! variable name
+ integer :: nv ! number of array elements
+ character(80), dimension(:), allocatable :: v ! value
+end type scriptvariable
+type(scriptvariable), dimension(:), allocatable :: svar
 
 ! call loadScript( FD, FN )
 ! call runScript
@@ -102,14 +109,17 @@ end subroutine loadScript !}}}
 subroutine runScript
 use lineParse
 implicit none
-integer :: i, j, wc, n, lastcall
-character(80) :: line, w(20), tmp
+integer :: i, j, ai, wc, n, lastcall
+character(80) :: line, w(20), tmp, tmp2
 real(4) :: rv ! real value from evaluate
 logical :: debug
 
-allocate( vnam(100), vval(100) ) ! users prolly don't need more than 100 vars
-vnam(:) = ""
-vval(:) = ""
+!allocate( vnam(100), vval(100) ) ! users prolly don't need more than 100 vars
+allocate( svar(100) )
+!vnam(:) = ""
+!vval(:) = ""
+svar(:)%n = ""
+svar(:)%nv = 0 ! zero means unallocated
 Nvars = 0
 debug = .false.
 lastcall = 1 ! script line number (snum) of last called GOTO with return feature
@@ -121,9 +131,18 @@ do ! infinite loop cuz the script might never end!
    exit
  endif
  line = script(i)
+ !!!! Parse line for variables and expressions before commands !!!!{{{
 !write(0,*) "s:"//trim(line)
  ! need to substitute variables if they exist
- w(1) = subVars( line )
+ do while (index(line,"[$").ne.0)  ! while there are brakets with variables
+  w(1) = s_get_between("[",line)  ! get the expression
+! if (debug) write(0,*) i,"a:"//trim(w(1))
+  w(2) = subVars( w(1) )          ! substitute the variables
+! if (debug) write(0,*) i,"b:"//trim(w(2))
+  line = s_sub( w(1), line, w(2) ) ! redefine the line
+! if (debug) write(0,*) i,"c:"//trim(line)
+ enddo
+ w(1) = subVars( line )  ! sub unnested variables
  line = w(1)
 !write(0,*) "v:"//trim(line)
  wc = s_word_count(line)
@@ -140,15 +159,17 @@ do ! infinite loop cuz the script might never end!
    w(j) = trim(w(j+1))  !using w(j+1) as temp variable
    line = trim(w(j+2))  !using w(j+2) as temp variable
  enddo
- if (debug) write(0,*) i,"r:"//trim(line)
+ if (debug) write(0,*) i,"r:"//trim(line) !}}}
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!60
- ! Let's parse the commands !
+ ! Let's parse the commands !!! {{{
  select case (trim(w(1)))
-  case ("DEBUG","debug"); debug = .true.
-  case ("PRINT","print"); tmp = adjustl(line)
+  case ("DEBUG"); debug = .true.
+  case ("PRINT"); tmp = adjustl(line)
    write(6,'(A)') trim(tmp(6:80))
-  case ("LBL","lbl"); ! do nothing
-  case ("GOTO","goto")
+  case ("EXEC"); tmp = adjustl(line)
+   call system(trim(tmp(6:80)))
+  case ("LBL"); ! do nothing
+  case ("GOTO")
    if (wc.ne.2.and.wc.ne.3) then
     write(0,*) "ERROR: sline:",i,"bad command: "//trim(line)
     write(0,*) "ERROR: the GOTO command requires an argument:"
@@ -168,7 +189,7 @@ do ! infinite loop cuz the script might never end!
      exit  ! found. change script line to line after label
     endif
    enddo
-  case ("IFGO","ifgo"); 
+  case ("IFGO"); 
    if (wc.ne.3.and.wc.ne.4) then
     write(0,*) "ERROR: sline:",i,"bad command: "//trim(line)
     write(0,*) "ERROR: the IFGO command requires two arguments:"
@@ -197,32 +218,89 @@ do ! infinite loop cuz the script might never end!
 !  case ("mycommand")
 !   read(w(2),*) myargument
 !!!!##########################################################################80
-  case default
+  case default !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!40
-!!!! Set variables !!!!
+!!!! Set variables and resolve variable functions !!!!{{{
    if (wc.gt.1) then
-    !if (trim(w(2)).eq."=") then
+    select case (trim(w(2))) ! check for variable functions
+     case ("WORD")
+      if (wc.lt.4) then
+       write(0,*) "ERROR: in WORD: expecting more arguments, sline",i
+       STOP
+      endif
+       j = index(trim(line),trim(w(3))) + len(trim(w(3)))
+       if (index(w(3),".").ne.0) then
+         read(w(3),*) rv; ai=nint(rv) ! make integer 
+       else
+         read(w(3),*) ai ! it's an integer
+       endif
+       w(2) = trim( s_get_word(ai,line(j:80)) )
+     case ("EQUAL")
+      if (wc.lt.4) then
+       write(0,*) "ERROR: in EQUAL: expecting more arguments, sline",i
+       STOP
+      endif
+      if (trim(w(3)).eq.trim(w(4))) then
+       w(2) = "1.0"
+      else
+       w(2) = "0.0"
+      endif
+     case ("WC")
+      write(w(2),*) wc-2 ! word count in remaining line
+!!!!##########################################################################80
+!!!! Add your user defined variable functions here !!!!
+!   case ("mycommand")
+!    w(2) = callfunc( w(3) )
+!!!!##########################################################################80
+     case default; ! override w(2) with fill line
+     ! check for a possibel = sign, don't want to include that
+     j = max(index(trim(line),trim(w(1)))+len(trim(w(1))) , index(trim(line),"=")+1)
+     w(2) = line(j:80)
+     !w(2) = s_get_word_range( 2, wc, line ) ! this removes too much stuff
+    end select
+    !! set the result, if any, to the variable value
     if (index(trim(line),"=").gt.0) then ! there's an equal sign in here
+     tmp = w(1)
+     ai = 1 ! default to a single array index
+     if (index(w(1),"[").ne.0) then ! there's an array index
+       call left_of("[",tmp) ! strip it off nice and slow
+       tmp2 = s_get_between("[",w(1)) ! get array index
+       if (index(tmp2,".").ne.0) then
+         read(tmp2,*) rv; ai=nint(rv) ! integer of array index
+       else
+         read(tmp2,*) ai ! it's an integer
+       endif
+     endif
      ! look to see if it exists, if not make it
      n = 0
      do j = 1, Nvars ! loop over existing variable names
-      if (trim(w(1)).eq.trim(vnam(j))) then ! found it
+      !if (trim(w(1)).eq.trim(svar(j)%n)) then ! found it
+      if (trim(tmp).eq.trim(svar(j)%n)) then ! found it
        n = j
       endif
      enddo
      if (n .eq. 0) then ! wasn't found, then make it
       n = Nvars + 1
       Nvars = Nvars + 1
-      vnam(n) = trim(w(1))
+      svar(n)%n = trim(tmp) ! set the variable name
+      allocate( svar(n)%v(ai) ) ! if you don't use the ARRAY command
+                                ! you could just: x[10] = 0, to make it.
+      svar(n)%nv = ai
      endif
-     vval(n) = trim(w(2))  ! set the word to the variable value
+     if (.not.allocated( svar(n)%v ).or.ai.gt.svar(n)%nv) then
+      write(0,*) "ERROR: trying to set variable value to out of bounds of " &
+           & //"variable array:"//trim(svar(n)%n)//" (",ai," of ",svar(n)%nv, &
+           & ") on sline:",i
+      STOP
+     endif
+     svar(n)%v(ai) = trim(w(2))  ! set the word to the variable value
   !write(0,*) "variable:"//trim(vnam(n))//" set to:"//trim(vval(n))
      cycle
     endif
    endif
    ! if it's not an equation then...
    write(0,*) "WARNING: sline:",i,"unknown command line: "//trim(line)
- end select
+ end select !}}}
  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!60
 enddo
 
@@ -231,11 +309,12 @@ end subroutine runScript
 function subVars( s ) !{{{
 use lineParse
 implicit none
-character(80) :: s, subVars, vv
+character(80) :: s, subVars, vv, tmp
 character(40) :: delims
-integer :: nv, n, i, k, endpos, startpos, ls
+integer :: nv, n, i, ai, k, endpos, startpos, ls
+real(4) :: rv
 
-delims = " +-=/^$~`!@#%*(){}[];:<>,.?|\"
+delims = '" +-=/^$~`!@#%*(){}[];:<>,.?|\'
 ls = len(trim(s))
 nv = 0 ! number of variables on line
 do i = 1, ls
@@ -259,28 +338,43 @@ do n = 1, nv
   enddo
  
   do i = startpos+1, ls
-    if (index(delims,subVars(i:i)).ne.0.or.i.eq.ls) then
+    if (index(delims,subVars(i:i)).ne.0) then
       endpos = i-1
-      if (i.eq.ls) then
-        endpos = i
-!write(0,*) "Variable at end of string", i, ls
-      endif
       ! found variable position, now substitute it
       exit ! done with this variable
+    elseif (i.eq.ls) then
+      endpos = i
+      exit
     endif
   enddo ! substitution of var
 
   k = 0
   do i = 1, Nvars
-   if (subVars(startpos+1:endpos).eq.vnam(i)) then
-    k = i
+   if (subVars(startpos+1:endpos).eq.trim(svar(i)%n)) then
+    k = i  ! found the variable name
     exit
    endif
   enddo
   if (k.eq.0) then
     write(0,*) "ERROR: variable:"//subVars(startpos:endpos)//" not found"
+    STOP
   endif
-  vv = s_sub( subvars(startpos:endpos), trim(subVars), vval(k) )
+
+  ! need to check for possible array index
+  ai = 1
+  if (endPos.lt.ls-3) then ! maybe?
+    if (subVars(endpos+1:endpos+1) .eq. "[") then ! yup
+      tmp = s_get_between( "[", subVars(endpos+1:ls) )
+      endpos = min(endpos+len(tmp),ls)
+       if (index(tmp,".").ne.0) then
+         read(tmp,*) rv; ai=nint(rv) ! integer of array index
+       else
+         read(tmp,*) ai ! it's an integer
+       endif
+    endif
+  endif
+
+  vv = s_sub( subvars(startpos:endpos), trim(subVars), svar(k)%v(ai) )
   subvars = vv
 enddo ! n vars
 

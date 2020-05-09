@@ -8,7 +8,19 @@
 # GOTO LBL [RETURN]      # jump script to label LBL. return if RETURN
 # IFGO EXPR LBL [RETURN] # this will GOTO LBL if EXPR >= 1.0
 # RETURN         # jumps back to the last line that had RETURN keyword in GOTO or IFGO.
+
 # if not a command, then checks for an equation for variable declaration.
+# variable names can be 40 chars, the values only 80 chars.
+# each line of this script can onyl be 8 chars.
+
+# define a variable with a big array index to allocate it:
+#   e.g. x[10] = 0 # creates $x[1] to $x[10] 
+# variable assignments can have "functions"
+# var = [WORD N] [STRING|EXPR] # the first set are optional functions
+# Assignment variable functions:
+# var = WORD N     extract the Nth word from the remaining line and set it to $word
+# var = EQUAL s1 s2 # returns 1.0 is s1==s2 else 0.0
+# var = WC [string|EXPR] # word count in string etc.
 # a semicolon ';' starts new command on same line, except for LBL.
 
 #DEBUG # returns each line final evaluated
@@ -16,10 +28,24 @@
 x=2.0*5 # set variable x
 y=250.0
 PRINT x=$x y=$y 
+# call a system command
+cmdline = echo testing system call x=$x y=$y 
+EXEC $cmdline # execute it
+# count words in variable
+wc = WC $cmdline
+PRINT word count is: ($wc-1)
+# example of extracting a word from a variable value.
+word = WORD 2 $cmdline  # this should set the second word in $cmdline to $word
+PRINT "$word"
+# string comparison (result can be used in IFGO statemnts)
+val = EQUAL $word testing # takes two words, $val >= 1.0 if true 0.0 if false
+PRINT is $word = "testing"? $val
 
 # call my do loop here instead of later and come back here afterward
 GOTO mydoloop RETURN
 PRINT returned from mydoloop subroutine
+
+PRINT array value? $a # if you use an array variable without an index, it uses [1]
 
 # example of some user definied commands for whatever, these will cause warnings
 boundary	$x-10 $x+10
@@ -37,6 +63,7 @@ LBL else
   PRINT condition is true: x>=250.0
 LBL endif  
 
+#GOTO openfile RETURN  # try to work on this
 
 GOTO eof # must have this before listing subroutines
 # ============================================================================80
@@ -51,8 +78,10 @@ GOTO eof # must have this before listing subroutines
   # ENDDO
   ## My do loop ##
   i = 0  # declare and set variable i
+  a[10] = 0 # declar an array of 1-10 elements
   LBL do
-   i = $i+1;  PRINT 10.0/$i sin($pi*$i/10.0)
+   i = $i+1;  a[$i] = sin($pi*$i/10.0)
+   PRINT 10.0/$i $a[$i]
    IFGO 10.0/($i+1) do # do while 10/i < 1.0
   # Alternate verbose ending, exit condition rather than while condition.
   # IFGO $i/10.0 enddo # when $i>=10.0 exit loop
@@ -60,6 +89,16 @@ GOTO eof # must have this before listing subroutines
   #LBL enddo
   ## end my do loop
   RETURN    # this should return execution to where it was called
+#END SUBROUTINE #============================================================80
+#SUBROUTINE OPEN_FILE #======================================================80
+  LBL openfile
+  OPEN mf filename # reference file id is "mf"
+  LBL dofile
+   READ mf line err  # read the next line in file id "mf" into variable line
+   IFGO (-1*$err) dofile   #exit loop when $err < 0
+  #REWIND mf  # this would rewind the file to point back at the first line.
+  CLOSE mf
+  RETURN
 #END SUBROUTINE #============================================================80
 
 LBL eof  # jump here to terminate script

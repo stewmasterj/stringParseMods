@@ -158,7 +158,7 @@ integer ( kind = 4 ) s_word_count
 character ( len = * ) s
 character ( len = 19 ) :: delimiters
 
-delimiters=" ,;:[]{}'=%"//char(09)//char(34)
+delimiters=" ,;:{}'=%"//char(09)//char(34)
 s_word_count = 0
 lens = len ( s )
 
@@ -190,8 +190,8 @@ character ( len = 80 )  s_get_word
 character ( len = 18 ) :: delimiters
 character ( len = 5 ) :: obrk, cbrk
 
-obrk="[{'"//char(34)
-cbrk="]}'"//char(34)
+obrk="{'"//char(34)
+cbrk="}'"//char(34)
 delimiters=" ,:;=%"//char(09)//obrk//cbrk
 s_word_count = 0
 lens = len ( trim(s) )
@@ -505,19 +505,38 @@ if (wp.eq.0) then
    return
  endif
 endif
-we = wp +lw 
+we = wp +lw ! this is actually the position after the word by +1
 
-if (wp.eq.1.and.lw.ge.ls) then
+if (wp.eq.1.and.lw.ge.ls) then ! the entire word
    s_sub = trim(adjustl(r))
-elseif (wp.eq.1) then
+elseif (wp.eq.1) then  ! at the start
    s_sub = trim(adjustl(r))//s(we:ls)
-elseif (we.ge.ls) then
+elseif (we-1.ge.ls) then
    s_sub = s(1:wp-1)//trim(adjustl(r))
 else
    s_sub = s(1:wp-1)//trim(adjustl(r))//s(we:ls)
 endif
 
 end function s_sub !}}}
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+function s_get_between( w, s ) !{{{
+! return string between the first two of "w" or match brackets
+implicit none
+character ( len = * ), intent(in) :: w, s
+character(80) :: s_get_between
+integer :: i, j, ls
+
+ls = len(trim(s))
+i = index(trim(s),trim(adjustl(w)))
+select case ( w )
+ case ("(");   j = index(s(i:ls),")")
+ case ("[");   j = index(s(i:ls),"]")
+ case ("{");   j = index(s(i:ls),"}")
+ case default; j = index(s(i:ls),trim(adjustl(w)))
+end select
+s_get_between = s(i+1:i+j-2)
+
+end function s_get_between !}}}
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 function evaluate( s ) !{{{
 implicit none
